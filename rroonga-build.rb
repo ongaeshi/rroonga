@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-# Copyright (C) 2009-2011  Kouhei Sutou <kou@clear-code.com>
+# Copyright (C) 2009-2012  Kouhei Sutou <kou@clear-code.com>
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -17,9 +17,9 @@
 
 module RroongaBuild
   module RequiredGroongaVersion
-    MAJOR = 1
-    MINOR = 2
-    MICRO = 5
+    MAJOR = 2
+    MINOR = 0
+    MICRO = 1
     VERSION = [MAJOR, MINOR, MICRO]
   end
 

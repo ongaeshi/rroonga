@@ -1,6 +1,6 @@
-/* -*- c-file-style: "ruby" -*- */
+/* -*- coding: utf-8; c-file-style: "ruby" -*- */
 /*
-  Copyright (C) 2009-2010  Kouhei Sutou <kou@clear-code.com>
+  Copyright (C) 2009-2012  Kouhei Sutou <kou@clear-code.com>
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -35,6 +35,8 @@ rb_grn_expression_finalizer (grn_ctx *context, grn_obj *object,
 {
     if (context && rb_grn_expression->value)
 	grn_obj_unlink(context, rb_grn_expression->value);
+
+    rb_grn_context_unregister_floating_object(RB_GRN_OBJECT(rb_grn_expression));
 
     rb_grn_expression->value = NULL;
 }
@@ -95,8 +97,9 @@ rb_grn_expression_initialize (int argc, VALUE *argv, VALUE self)
     }
 
     expression = grn_expr_create(context, name, name_size);
-    rb_grn_object_assign(Qnil, self, rb_context, context, expression);
     rb_grn_context_check(context, self);
+    rb_grn_object_assign(Qnil, self, rb_context, context, expression);
+    rb_grn_context_register_floating_object(DATA_PTR(self));
 
     rb_iv_set(self, "@objects", rb_ary_new());
 
@@ -107,14 +110,16 @@ rb_grn_expression_initialize (int argc, VALUE *argv, VALUE self)
  * call-seq:
  *   expression.define_variable(options={}) -> Groonga::Variable
  *
- * _expression_で使用可能な変数を作成する。
+ * _expression_ で使用可能な変数を作成する。
  *
- * _options_に指定可能な値は以下の通り。
+ * _options_ に指定可能な値は以下の通り。
+ * @param options [::Hash] The name and value
+ *   pairs. Omitted names are initialized as the default value.
+ * @option options :name (false)
  *
- * [+:name+]
  *   変数の名前。省略した場合は名前を付けない。
+ * @option options :domain
  *
- * [+:domain+]
  *   テーブルを指定すると、そのテーブル用のレコードとして初期化する。
  */
 static VALUE
@@ -160,7 +165,7 @@ rb_grn_expression_define_variable (int argc, VALUE *argv, VALUE self)
  *                            operation=Groonga::Operator::PUSH,
  *                            n_arguments=1) -> self
  *
- * _object_を追加し、_n_arguments_個の引数を取る_operation_を追加する。
+ * _object_ を追加し、 _n_arguments_ 個の引数を取る _operation_ を追加する。
  */
 static VALUE
 rb_grn_expression_append_object (int argc, VALUE *argv, VALUE self)
@@ -196,7 +201,7 @@ rb_grn_expression_append_object (int argc, VALUE *argv, VALUE self)
  *                              operation=Groonga::Operator::PUSH,
  *                              n_arguments=1) -> self
  *
- * _constant_を追加し、_n_arguments_個の引数を取る_operation_を追加する。
+ * _constant_ を追加し、 _n_arguments_ 個の引数を取る _operation_ を追加する。
  */
 static VALUE
 rb_grn_expression_append_constant (int argc, VALUE *argv, VALUE self)
@@ -233,7 +238,7 @@ rb_grn_expression_append_constant (int argc, VALUE *argv, VALUE self)
  * call-seq:
  *   expression.append_operation(operation, n_arguments)
  *
- * _n_arguments_個の引数を取る_operation_を追加する。
+ * _n_arguments_ 個の引数を取る _operation_ を追加する。
  */
 static VALUE
 rb_grn_expression_append_operation (VALUE self, VALUE rb_operation,
@@ -259,19 +264,21 @@ rb_grn_expression_append_operation (VALUE self, VALUE rb_operation,
  * call-seq:
  *   expression.parse(query, options={})
  *
- * 文字列_query_をパースする。
+ * 文字列 _query_ をパースする。
  *
- * _options_に指定可能な値は以下の通り。
+ * _options_ に指定可能な値は以下の通り。
+ * @param options [::Hash] The name and value
+ *   pairs. Omitted names are initialized as the default value.
+ * @option options :default_column The default_column
  *
- * [+:default_column+]
  *   "column_name:hoge"ではなく"hoge"のようにcolumn_nameが指
  *   定されない条件の検索対象となるカラムを指定する。
+ * @option options :default_operator (Groonga::Operator::AND)
  *
- * [+:default_operator+]
+ *   The default_operator
  *   "+"や"OR"で繋がれず、ただ列挙された複数の条件があった時、
- *   _expression_全体として各レコードをヒットとみなすかの論理
+ *   _expression_ 全体として各レコードをヒットとみなすかの論理
  *   条件を指定する。省略した場合はGroonga::Operator::AND。
- *
  *   [Groonga::Operator::OR]
  *     レコードはいずれかの条件にマッチすればいい。
  *   [Groonga::Operator::AND]
@@ -279,15 +286,16 @@ rb_grn_expression_append_operation (VALUE self, VALUE rb_operation,
  *   [Groonga::Operator::BUT]
  *     最初の条件にレコードはマッチし、残りの条件にレコードは
  *     マッチしてはならない。
+ * @option options :default_mode (Groonga::Operator::MATCH) The default_mode
  *
- * [+:default_mode+]
  *   検索時のモードを指定する。省略した場合は
  *   Groonga::Operator::MATCH。（FIXME: モードによってどう
  *   いう動作になるかを書く。）
  *
- * [+:syntax+]
- *   _query_の構文を指定する。指定可能な値は以下の通り。省略
- *   した場合は+:query+。
+ * @option options :syntax (:query) The syntax
+ *
+ *   _query_ の構文を指定する。指定可能な値は以下の通り。省略
+ *   した場合は +:query+ 。
  *
  *   [+nil+]
  *     +:query+と同様。
@@ -303,18 +311,19 @@ rb_grn_expression_append_operation (VALUE self, VALUE rb_operation,
  *
  *     参考: grn式のscript形式（link:text/expression_rdoc.html）
  *
- * [+:allow_pragma+]
- *   _query_の構文にqueryを用いているとき（+:syntax+オプショ
- *   ン参照）、「*E-1」というようにクエリの先頭でpragmaを利
- *   用できるようにする。script構文を用いているときはこのオ
- *   プションを利用できない。
+ * @option options :allow_pragma The allow_pragma
+ *   _query_ の構文に query を用いているとき（ +:syntax+
+ *   オプション参照）、「*E-1」というようにクエリの先頭で
+ *   pragmaを利用できるようにする。script構文を用いている
+ *   ときはこのオプションを利用できない。
  *
  *   デフォルトではプラグマを利用できる。
  *
  *   参考: grn式のquery形式（link:text/expression_rdoc.html）
  *
- * [+:allow_column+]
- *   _query_の構文にqueryを用いているとき（+:syntax+オプショ
+ * @option options :allow_column The allow_column
+ *
+ *   _query_ の構文にqueryを用いているとき（+:syntax+オプショ
  *   ン参照）、「カラム名:値」というようにカラム名を指定した
  *   条件式を利用できるようにする。script構文を用いていると
  *   きはこのオプションを利用できない。
@@ -323,8 +332,9 @@ rb_grn_expression_append_operation (VALUE self, VALUE rb_operation,
  *
  *   参考: grn式のquery形式（link:text/expression_rdoc.html）
  *
- * [+:allow_update+]
- *   _query_の構文にscriptを用いているとき（+:syntax+オプショ
+ * @option options :allow_update The allow_update
+ *
+ *   _query_の構文にscriptを用いているとき（ +:syntax+ オプショ
  *   ン参照）、「カラム名 = 値」というように更新操作を利用で
  *   きるようにする。query構文を用いているときはこのオプショ
  *   ンを利用できない。
@@ -493,8 +503,8 @@ rb_grn_expression_compile (VALUE self)
  *   expression[name] -> 変数の値
  *   expression[offset] -> 変数の値
  *
- * _expression_で使用可能な変数のうち、名前が_name_または
- * _offset_番目にExpression#append_objectされた変数の値を返
+ * _expression_ で使用可能な変数のうち、名前が _name_ または
+ * _offset_ 番目にExpression#append_objectされた変数の値を返
  * す。
  */
 static VALUE
@@ -537,7 +547,7 @@ grn_rc grn_expr_inspect(grn_ctx *ctx, grn_obj *buf, grn_obj *expr);
  * call-seq:
  *   _expression_.inspect -> String
  *
- * _expression_の中身を人に見やすい文字列で返す。
+ * _expression_ の中身を人に見やすい文字列で返す。
  */
 static VALUE
 rb_grn_expression_inspect (VALUE self)
@@ -571,46 +581,56 @@ rb_grn_expression_inspect (VALUE self)
  * call-seq:
  *   expression.snippet(tags, options) -> Groonga::Snippet
  *
- * _expression_からGroonga::Snippetを生成する。_tags_にはキー
- * ワードの前後に挿入するタグの配列を以下のような形式で指定
+ * _expression_ からGroonga::Snippetを生成する。 _tags_ には
+ * キーワードの前後に挿入するタグの配列を以下のような形式で指定
  * する。
  *
- *   [
- *    ["キーワード前に挿入する文字列1", "キーワード後に挿入する文字列1"],
- *    ["キーワード前に挿入する文字列2", "キーワード後に挿入する文字列2"],
- *    ...,
- *   ]
+ * <pre>
+ * !!!ruby
+ * [
+ *  ["キーワード前に挿入する文字列1", "キーワード後に挿入する文字列1"],
+ *  ["キーワード前に挿入する文字列2", "キーワード後に挿入する文字列2"],
+ *  # ...,
+ * ]
+ * </pre>
  *
- * もし、1つのスニペットの中に_tags_で指定したタグより多くの
+ * もし、1つのスニペットの中に _tags_ で指定したタグより多くの
  * キーワードが含まれている場合は、以下のように、また、先頭
  * のタグから順番に使われる。
  *
- *   expression.parse("Ruby groonga 検索")
- *   tags = [["<tag1>", "</tag1>"], ["<tag2>", "</tag2>"]]
- *   snippet = expression.snippet(tags)
- *   p snippet.execute("Rubyでgroonga使って全文検索、高速検索。")
- *     # => ["<tag1>Ruby</tag1>で<tag2>groonga</tag2>"
- *     #     "使って全文<tag1>検索</tag1>、高速<tag2>検索</tag2>。"]
+ * <pre>
+ * !!!ruby
+ * expression.parse("Ruby groonga 検索")
+ * tags = [["<tag1>", "</tag1>"], ["<tag2>", "</tag2>"]]
+ * snippet = expression.snippet(tags)
+ * p snippet.execute("Rubyでgroonga使って全文検索、高速検索。")
+ *    # => ["<tag1>Ruby</tag1>で<tag2>groonga</tag2>"
+ *    # =>  "使って全文<tag1>検索</tag1>、高速<tag2>検索</tag2>。"]
+ * </pre>
  *
- * _options_に指定可能な値は以下の通り。
+ * _options_ に指定可能な値は以下の通り。
+ * @param options [::Hash] The name and value
+ *   pairs. Omitted names are initialized as the default value.
+ * @option options :normalize (false) The normalize
  *
- * [+:normalize+]
  *   キーワード文字列・スニペット元の文字列を正規化するかど
- *   うか。省略した場合は+false+で正規化しない。
+ *   うか。省略した場合は +false+ で正規化しない。
  *
- * [+:skip_leading_spaces+]
- *   先頭の空白を無視するかどうか。省略した場合は+false+で無
+ * @option options :skip_leading_spaces (false) The skip_leading_spaces
+ *
+ *   先頭の空白を無視するかどうか。省略した場合は +false+ で無
  *   視しない。
  *
- * [+:width+]
+ * @option options :width (100) The width
+ *
  *   スニペット文字列の長さ。省略した場合は100文字。
+ * @option options :max_results (3) The max_results
  *
- * [+:max_results+]
  *   生成するスニペットの最大数。省略した場合は3。
+ * @option options :html_escape (false) The html_escape
  *
- * [+:html_escape+]
- *   スニペット内の+<+, +>+, +&+, +"+をHTMLエスケープするか
- *   どうか。省略した場合は+false+で、HTMLエスケープしない。
+ *   スニペット内の +<+, +>+, +&+, +"+ をHTMLエスケープするか
+ *   どうか。省略した場合は +false+ で、HTMLエスケープしない。
  */
 static VALUE
 rb_grn_expression_snippet (int argc, VALUE *argv, VALUE self)
@@ -623,6 +643,7 @@ rb_grn_expression_snippet (int argc, VALUE *argv, VALUE self)
     VALUE rb_width, rb_max_results, rb_tags;
     VALUE rb_html_escape;
     VALUE *rb_tag_values;
+    VALUE related_object;
     unsigned int i;
     int flags = GRN_SNIP_COPY_TAG;
     unsigned int width = 100;
@@ -703,10 +724,10 @@ rb_grn_expression_snippet (int argc, VALUE *argv, VALUE self)
                             (const char **)open_tags, open_tag_lengths,
                             (const char **)close_tags, close_tag_lengths,
                             mapping);
-    rb_grn_context_check(context,
-			 rb_ary_new3(2, self, rb_ary_new4(argc, argv)));
+    related_object = rb_ary_new3(2, self, rb_ary_new4(argc, argv));
+    rb_grn_context_check(context, related_object);
 
-    return GRNSNIPPET2RVAL(context, snippet, GRN_TRUE);
+    return GRNOBJECT2RVAL(Qnil, context, (grn_obj *)snippet, GRN_TRUE);
 }
 
 void

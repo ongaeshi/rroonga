@@ -49,7 +49,6 @@ module Groonga
 
     private
     def dump_plugins(options)
-      first_table = true
       plugin_paths = {}
       options[:database].each(:order_by => :id) do |object|
         next unless object.is_a?(Groonga::Procedure)
@@ -138,7 +137,8 @@ module Groonga
       end
     end
 
-    class BaseSyntax # :nodoc:
+    # @private
+    class BaseSyntax
       def initialize(database, output)
         @database = database
         @output = output
@@ -223,7 +223,8 @@ module Groonga
       end
     end
 
-    class RubySyntax < BaseSyntax # :nodoc:
+    # @private
+    class RubySyntax < BaseSyntax
       private
       def create_table_header(table)
         parameters = []
@@ -301,14 +302,12 @@ module Groonga
       def column_method(column)
         range = column.range
         case range.name
-        when "Int32"
-          "integer32"
-        when "Int64"
-          "integer64"
-        when "UInt32"
-          "unsigned_integer32"
-        when "UInt64"
-          "unsigned_integer64"
+        when "Bool"
+          "boolean"
+        when /\AInt(8|16|32|64)\z/
+          "integer#{$1}"
+        when /\AUInt(8|16|32|64)\z/
+          "unsigned_integer#{$1}"
         when "Float"
           "float"
         when "Time"
@@ -319,6 +318,10 @@ module Groonga
           "text"
         when "LongText"
           "long_text"
+        when "TokyoGeoPoint"
+          "tokyo_geo_point"
+        when "WGS84GeoPoint"
+          "wgs84_geo_point"
         else
           raise ArgumentError, "unsupported column: #{column.inspect}"
         end
@@ -347,7 +350,8 @@ module Groonga
       end
     end
 
-    class CommandSyntax < BaseSyntax # :nodoc:
+    # @private
+    class CommandSyntax < BaseSyntax
       private
       def create_table_header(table)
         parameters = []

@@ -1,4 +1,4 @@
-/* -*- c-file-style: "ruby" -*- */
+/* -*- coding: utf-8; c-file-style: "ruby" -*- */
 /*
   Copyright (C) 2009-2011  Kouhei Sutou <kou@clear-code.com>
 
@@ -83,36 +83,39 @@ static void
 rb_grn_object_run_finalizer (grn_ctx *context, grn_obj *grn_object,
 			     RbGrnObject *rb_grn_object)
 {
+    RbGrnContext *rb_grn_context = NULL;
+
     if (rb_grn_exited)
 	return;
 
     grn_obj_set_finalizer(context, grn_object, NULL);
 
-    debug("finalize: %p:%p:%p:%p:%p %s(%#x)\n",
+    debug("finalize: %p:%p:%p:%p:%p:%p %s(%#x)\n",
 	  context, grn_object, rb_grn_object,
 	  rb_grn_object->context, rb_grn_object->object,
+	  rb_grn_object->rb_grn_context,
 	  rb_grn_inspect_type(grn_object->header.type),
 	  grn_object->header.type);
 
-    rb_grn_object->context = NULL;
-    rb_grn_object->object = NULL;
+    rb_grn_context = rb_grn_object->rb_grn_context;
     rb_grn_object->have_finalizer = GRN_FALSE;
 
     switch (grn_object->header.type) {
       case GRN_DB:
-	if (!(context->flags & GRN_CTX_PER_DB)) {
-	    grn_ctx_use(context, NULL);
-	}
+	rb_grn_database_finalizer(context, rb_grn_context,
+				  grn_object, rb_grn_object);
 	break;
       case GRN_TYPE:
       case GRN_PROC:
       case GRN_CURSOR_TABLE_HASH_KEY:
       case GRN_CURSOR_TABLE_PAT_KEY:
+      case GRN_CURSOR_TABLE_DAT_KEY:
       case GRN_CURSOR_TABLE_NO_KEY:
       case GRN_CURSOR_TABLE_VIEW:
 	break;
       case GRN_TABLE_HASH_KEY:
       case GRN_TABLE_PAT_KEY:
+      case GRN_TABLE_DAT_KEY:
 	rb_grn_table_key_support_finalizer(context, grn_object,
 					   RB_GRN_TABLE_KEY_SUPPORT(rb_grn_object));
 	break;
@@ -140,6 +143,10 @@ rb_grn_object_run_finalizer (grn_ctx *context, grn_obj *grn_object,
 	rb_grn_expression_finalizer(context, grn_object,
 				    RB_GRN_EXPRESSION(rb_grn_object));
 	break;
+      case GRN_SNIP:
+	rb_grn_snippet_finalizer(context, grn_object,
+				 RB_GRN_SNIPPET(rb_grn_object));
+	break;
       default:
 	rb_raise(rb_eTypeError,
 		 "unsupported groonga object type for finalizer: %s(%#x)",
@@ -147,6 +154,10 @@ rb_grn_object_run_finalizer (grn_ctx *context, grn_obj *grn_object,
 		 grn_object->header.type);
 	break;
     }
+
+    rb_grn_object->rb_grn_context = NULL;
+    rb_grn_object->context = NULL;
+    rb_grn_object->object = NULL;
 }
 
 static grn_obj *
@@ -219,6 +230,9 @@ rb_grn_object_to_ruby_class (grn_obj *object)
       case GRN_TABLE_PAT_KEY:
 	klass = rb_cGrnPatriciaTrie;
 	break;
+      case GRN_TABLE_DAT_KEY:
+	klass = rb_cGrnDoubleArrayTrie;
+	break;
       case GRN_TABLE_NO_KEY:
 	klass = rb_cGrnArray;
 	break;
@@ -233,6 +247,9 @@ rb_grn_object_to_ruby_class (grn_obj *object)
 	break;
       case GRN_ACCESSOR_VIEW:
 	klass = rb_cGrnViewAccessor;
+	break;
+      case GRN_SNIP:
+	klass = rb_cGrnSnippet;
 	break;
       case GRN_PROC:
 	klass = rb_cGrnProcedure;
@@ -254,6 +271,9 @@ rb_grn_object_to_ruby_class (grn_obj *object)
 	break;
       case GRN_CURSOR_TABLE_PAT_KEY:
 	klass = rb_cGrnPatriciaTrieCursor;
+	break;
+      case GRN_CURSOR_TABLE_DAT_KEY:
+	klass = rb_cGrnDoubleArrayTrieCursor;
 	break;
       case GRN_CURSOR_TABLE_NO_KEY:
 	klass = rb_cGrnArrayCursor;
@@ -311,12 +331,21 @@ rb_grn_object_bind_common (VALUE klass, VALUE self, VALUE rb_context,
 			   grn_ctx *context, grn_obj *object)
 {
     grn_user_data *user_data;
+    RbGrnContext *rb_grn_context;
 
+    debug("bind: %p:%p:%p %s(%#x)\n",
+	  context, object, rb_grn_object,
+	  rb_grn_inspect_type(object->header.type),
+	  object->header.type);
+
+    Data_Get_Struct(rb_context, RbGrnContext, rb_grn_context);
+    rb_grn_object->rb_grn_context = rb_grn_context;
     rb_grn_object->context = context;
     rb_grn_object->object = object;
     rb_grn_object->self = self;
     rb_grn_object->need_close = GRN_TRUE;
     rb_grn_object->have_finalizer = GRN_FALSE;
+    rb_grn_object->floating = GRN_FALSE;
 
     user_data = grn_obj_user_data(context, object);
     if (user_data) {
@@ -337,7 +366,6 @@ rb_grn_object_bind_common (VALUE klass, VALUE self, VALUE rb_context,
     }
 
     switch (object->header.type) {
-      case GRN_DB:
       case GRN_PROC:
       case GRN_TYPE:
       case GRN_ACCESSOR: /* TODO: We want to close GRN_ACCESSOR. */
@@ -384,6 +412,7 @@ rb_grn_object_assign (VALUE klass, VALUE self, VALUE rb_context,
 	(RVAL2CBOOL(rb_obj_is_kind_of(self, rb_cGrnType))) ||
 	klass == rb_cGrnHashCursor ||
 	klass == rb_cGrnPatriciaTrieCursor ||
+	klass == rb_cGrnDoubleArrayTrieCursor ||
 	klass == rb_cGrnArrayCursor ||
 	klass == rb_cGrnViewCursor ||
 	klass == rb_cGrnIndexCursor ||
@@ -431,6 +460,12 @@ rb_grn_object_assign (VALUE klass, VALUE self, VALUE rb_context,
 				  context, object);
 	rb_grn_expression_bind(RB_GRN_EXPRESSION(rb_grn_object),
 			       context, object);
+    } else if (klass == rb_cGrnSnippet) {
+	rb_grn_object = ALLOC(RbGrnSnippet);
+	rb_grn_object_bind_common(klass, self, rb_context, rb_grn_object,
+				  context, object);
+	rb_grn_snippet_bind(RB_GRN_SNIPPET(rb_grn_object),
+			    context, object);
     } else {
 	rb_raise(rb_eTypeError,
 		 "unsupported groonga object type for assignment: %s(%#x)",
@@ -527,7 +562,7 @@ rb_grn_object_deconstruct (RbGrnObject *rb_grn_object,
  * call-seq:
  *   object.close
  *
- * _object_が使用しているリソースを開放する。これ以降_object_を
+ * _object_ が使用しているリソースを開放する。これ以降 _object_ を
  * 使うことはできない。
  */
 VALUE
@@ -554,7 +589,7 @@ rb_grn_object_close (VALUE self)
  * call-seq:
  *   object.unlink
  *
- * _object_のリファレンスカウンタを1減少する。
+ * _object_ のリファレンスカウンタを1減少する。
  */
 VALUE
 rb_grn_object_unlink (VALUE self)
@@ -582,8 +617,8 @@ rb_grn_object_unlink (VALUE self)
  * call-seq:
  *   object.closed? -> true/false
  *
- * _object_が開放済みの場合は+true+を返し、そうでない場合は
- * +false+を返す。
+ * _object_ が開放済みの場合は+true+を返し、そうでない場合は
+ * +false+ を返す。
  */
 VALUE
 rb_grn_object_closed_p (VALUE self)
@@ -781,6 +816,8 @@ rb_grn_object_inspect_content_flags_with_label (VALUE inspected,
 	    rb_ary_push(inspected_flags, rb_str_new2("TABLE_HASH_KEY"));
 	if (flags & GRN_OBJ_TABLE_PAT_KEY)
 	    rb_ary_push(inspected_flags, rb_str_new2("TABLE_PAT_KEY"));
+	if (flags & GRN_OBJ_TABLE_DAT_KEY)
+	    rb_ary_push(inspected_flags, rb_str_new2("TABLE_DAT_KEY"));
 	if (flags & GRN_OBJ_TABLE_NO_KEY)
 	    rb_ary_push(inspected_flags, rb_str_new2("TABLE_NO_KEY"));
 	if (flags & GRN_OBJ_TABLE_VIEW)
@@ -805,6 +842,7 @@ rb_grn_object_inspect_content_flags_with_label (VALUE inspected,
     switch (object->header.type) {
       case GRN_TABLE_HASH_KEY:
       case GRN_TABLE_PAT_KEY:
+      case GRN_TABLE_DAT_KEY:
 	if (flags & GRN_OBJ_KEY_WITH_SIS)
 	    rb_ary_push(inspected_flags, rb_str_new2("KEY_WITH_SIS"));
 	if (flags & GRN_OBJ_KEY_NORMALIZE)
@@ -929,7 +967,7 @@ rb_grn_object_inspect_footer (VALUE self, VALUE inspected)
  * call-seq:
  *   object.inspect -> 詳細情報
  *
- * _object_の詳細を示した文字列を返す。デバッグ用。
+ * _object_ の詳細を示した文字列を返す。デバッグ用。
  */
 static VALUE
 rb_grn_object_inspect (VALUE self)
@@ -950,8 +988,8 @@ rb_grn_object_inspect (VALUE self)
  * call-seq:
  *   object.id -> ID/nil
  *
- * _object_のIDを返す。_object_が#closed?なときやIDがない場合
- * は+nil+を返す。
+ * _object_ のIDを返す。 _object_ が#closed?なときやIDがない場合
+ * は +nil+ を返す。
  */
 VALUE
 rb_grn_object_get_id (VALUE self)
@@ -976,8 +1014,8 @@ rb_grn_object_get_id (VALUE self)
  * call-seq:
  *   object.path -> ファイルパス/nil
  *
- * _object_に対応するファイルパスを返す。一時_object_
- * なら+nil+を返す。
+ * _object_ に対応するファイルパスを返す。一時 _object_
+ * なら +nil+ を返す。
  */
 static VALUE
 rb_grn_object_get_path (VALUE self)
@@ -1003,8 +1041,8 @@ rb_grn_object_get_path (VALUE self)
  * call-seq:
  *   object.temporary? -> true/false
  *
- * _object_が一時オブジェクトなら+true+、永続オブジェクトな
- * ら+false+を返す。
+ * _object_ が一時オブジェクトなら +true+ 、永続オブジェクトな
+ * ら +false+ を返す。
  */
 static VALUE
 rb_grn_object_temporary_p (VALUE self)
@@ -1024,8 +1062,8 @@ rb_grn_object_temporary_p (VALUE self)
  * call-seq:
  *   object.persistent? -> true/false
  *
- * _object_が永続オブジェクトなら+true+、一時オブジェクトな
- * ら+false+を返す。
+ * _object_ が永続オブジェクトなら +true+ 、一時オブジェクトな
+ * ら +false+ を返す。
  */
 static VALUE
 rb_grn_object_persistent_p (VALUE self)
@@ -1045,9 +1083,9 @@ rb_grn_object_persistent_p (VALUE self)
  * call-seq:
  *   object.domain -> Groonga::Object/nil
  *
- * _object_の属しているGroonga::Objectを返す。例えば、
+ * _object_ の属しているGroonga::Objectを返す。例えば、
  * Groonga::ColumnはGroonga::Tableを返す。属している
- * Groonga::Objectがない場合は+nil+を返す。
+ * Groonga::Objectがない場合は +nil+ を返す。
  */
 static VALUE
 rb_grn_object_get_domain (VALUE self)
@@ -1083,7 +1121,7 @@ rb_grn_object_get_domain (VALUE self)
  * call-seq:
  *   object.name -> 名前/nil
  *
- * _object_の名前を返す。無名オブジェクトの場合は+nil+を返す。
+ * _object_ の名前を返す。無名オブジェクトの場合は +nil+ を返す。
  */
 static VALUE
 rb_grn_object_get_name (VALUE self)
@@ -1117,11 +1155,11 @@ rb_grn_object_get_name (VALUE self)
  * call-seq:
  *   object.range -> Groonga::Object/nil
  *
- * _object_の値がとりうる範囲を示したGroonga::Objectを返す。
+ * _object_ の値がとりうる範囲を示したGroonga::Objectを返す。
  * 例えば、Groonga::Columnの場合は
  * Groonga::Table#define_columnで指定されたGroonga::Typeや
  * Groonga::Tableを返す。
- * 範囲が指定されていないオブジェクトの場合は+nil+を返す。
+ * 範囲が指定されていないオブジェクトの場合は +nil+ を返す。
  */
 static VALUE
 rb_grn_object_get_range (VALUE self)
@@ -1157,8 +1195,8 @@ rb_grn_object_get_range (VALUE self)
  * call-seq:
  *   object == other -> true/false
  *
- * _object_と_other_が同じgroongaのオブジェクトなら+true+を返
- * し、そうでなければ+false+を返す。
+ * _object_ と _other_ が同じgroongaのオブジェクトなら +true+ を返
+ * し、そうでなければ +false+ を返す。
  */
 static VALUE
 rb_grn_object_equal (VALUE self, VALUE other)
@@ -1184,7 +1222,7 @@ rb_grn_object_equal (VALUE self, VALUE other)
  * call-seq:
  *   object[id] -> 値
  *
- * _object_の_id_に対応する値を返す。
+ * _object_ の _id_ に対応する値を返す。
  */
 VALUE
 rb_grn_object_array_reference (VALUE self, VALUE rb_id)
@@ -1212,6 +1250,7 @@ rb_grn_object_array_reference (VALUE self, VALUE rb_id)
     switch (object->header.type) {
       case GRN_TABLE_HASH_KEY:
       case GRN_TABLE_PAT_KEY:
+      case GRN_TABLE_DAT_KEY:
       case GRN_TABLE_NO_KEY:
 	GRN_OBJ_INIT(&value, GRN_BULK, 0, GRN_ID_NIL);
 	break;
@@ -1271,6 +1310,7 @@ rb_uvector_value_p (RbGrnObject *rb_grn_object, VALUE rb_value)
 	break;
       case GRN_TABLE_HASH_KEY:
       case GRN_TABLE_PAT_KEY:
+      case GRN_TABLE_DAT_KEY:
       case GRN_TABLE_NO_KEY:
       case GRN_TABLE_VIEW:
 	first_element = rb_ary_entry(rb_value, 0);
@@ -1345,7 +1385,7 @@ rb_grn_object_set (VALUE self, VALUE rb_id, VALUE rb_value, int flags)
  * call-seq:
  *   object[id] = value
  *
- * _object_の_id_に対応する値を設定する。既存の値は上書きさ
+ * _object_ の _id_ に対応する値を設定する。既存の値は上書きさ
  * れる。
  */
 static VALUE
@@ -1360,7 +1400,7 @@ rb_grn_object_array_set (VALUE self, VALUE rb_id, VALUE rb_value)
  * call-seq:
  *   object.append(id, value)
  *
- * _object_の_id_に対応する値の最後に_value_を追加する。
+ * _object_ の _id_ に対応する値の最後に _value_ を追加する。
  */
 static VALUE
 rb_grn_object_append_value (VALUE self, VALUE rb_id, VALUE rb_value)
@@ -1374,7 +1414,7 @@ rb_grn_object_append_value (VALUE self, VALUE rb_id, VALUE rb_value)
  * call-seq:
  *   object.prepend(id, value)
  *
- * _object_の_id_に対応する値の最初に_value_を追加する。
+ * _object_ の _id_ に対応する値の最初に _value_ を追加する。
  */
 static VALUE
 rb_grn_object_prepend_value (VALUE self, VALUE rb_id, VALUE rb_value)
@@ -1388,7 +1428,7 @@ rb_grn_object_prepend_value (VALUE self, VALUE rb_id, VALUE rb_value)
  * call-seq:
  *   object.remove
  *
- * _object_をメモリから解放し、それが永続オブジェクトであっ
+ * _object_ をメモリから解放し、それが永続オブジェクトであっ
  * た場合は、該当するファイル一式を削除する。
  */
 static VALUE

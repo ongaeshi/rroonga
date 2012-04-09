@@ -42,11 +42,11 @@ class PatriciaTrieTest < Test::Unit::TestCase
 
   def test_search
     users = Groonga::Array.create(:name => "Users")
-    user_name = users.define_column("name", "ShortText")
+    users.define_column("name", "ShortText")
 
     bookmarks = Groonga::PatriciaTrie.create(:name => "Bookmarks",
                                              :key_type => "ShortText")
-    bookmark_user_id = bookmarks.define_column("user_id", users)
+    bookmarks.define_column("user_id", users)
 
     daijiro = users.add
     daijiro["name"] = "daijiro"
@@ -187,10 +187,10 @@ class PatriciaTrieTest < Test::Unit::TestCase
   def test_prefix_search
     paths = Groonga::PatriciaTrie.create(:name => "Paths",
                                          :key_type => 'ShortText')
-    root_path = paths.add('/')
-    tmp_path = paths.add('/tmp')
-    usr_bin_path = paths.add('/usr/bin')
-    usr_local_bin_path = paths.add('/usr/local/bin')
+    paths.add('/')
+    paths.add('/tmp')
+    paths.add('/usr/bin')
+    paths.add('/usr/local/bin')
 
     records = paths.prefix_search('/')
     assert_equal(["/usr/local/bin", "/usr/bin", "/tmp", "/"],
@@ -213,10 +213,10 @@ class PatriciaTrieTest < Test::Unit::TestCase
   def test_prefix_cursor
     paths = Groonga::PatriciaTrie.create(:name => "Paths",
                                          :key_type => 'ShortText')
-    root_path = paths.add('/')
-    tmp_path = paths.add('/tmp')
-    usr_bin_path = paths.add('/usr/bin')
-    usr_local_bin_path = paths.add('/usr/local/bin')
+    paths.add('/')
+    paths.add('/tmp')
+    paths.add('/usr/bin')
+    paths.add('/usr/local/bin')
 
     assert_prefix_cursor(["/usr/local/bin", "/usr/bin", "/tmp", "/"],
                          paths, "/", {:order => :desc})
@@ -387,5 +387,29 @@ class PatriciaTrieTest < Test::Unit::TestCase
     assert_predicate(bob, :added?)
     bob_again = users.add("bob")
     assert_not_predicate(bob_again, :added?)
+  end
+
+  def test_defrag
+    users = Groonga::PatriciaTrie.create(:name => "Users",
+                                         :key_type => "ShortText")
+    users.define_column("name", "ShortText")
+    users.define_column("address", "ShortText")
+    1000.times do |i|
+      users.add("user #{i}",
+                :name => "user #{i}" * 1000,
+                :address => "address #{i}" * 1000)
+    end
+    assert_equal(7, users.defrag)
+  end
+
+  def test_rename
+    users = Groonga::PatriciaTrie.create(:name => "Users",
+                                         :key_type => "ShortText")
+    name = users.define_column("name", "ShortText")
+    address = users.define_column("address", "ShortText")
+
+    users.rename("People")
+    assert_equal(["People", "People.name", "People.address"],
+                 [users.name, name.name, address.name])
   end
 end

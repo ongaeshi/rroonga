@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2009-2010  Kouhei Sutou <kou@clear-code.com>
+# Copyright (C) 2009-2012  Kouhei Sutou <kou@clear-code.com>
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -39,7 +39,7 @@ require 'groonga/record'
 require 'groonga/expression-builder'
 require 'groonga/posting'
 begin
-  major, minor, micro, = RUBY_VERSION.split(/\./)
+  major, minor, _ = RUBY_VERSION.split(/\./)
   require "#{major}.#{minor}/groonga.so"
 rescue LoadError
   require 'groonga.so'
@@ -58,12 +58,15 @@ module Groonga
       BUILD_VERSION.join(".")
     end
 
-    ##
-    # VERSIONを"."で結合して<tt>"メジャーバージョン.マイナー
-    # バージョン.マイクロバージョン"</tt>という形式の文字列に
-    # したもの。
+    # Format version.
+    #
+    # @return [String] If Groonga::VERSION has tag,
+    #   @MAJOR.MINOR.MICRO-TAG@. Otherwise, @MAJOR.MINOR.MICRO@.
     def version
-      VERSION.join(".")
+      major, minor, micro, tag = VERSION
+      version_string = [major, minor, micro].join(".")
+      version_string << "-#{tag}" if tag
+      version_string
     end
 
     ##
@@ -91,3 +94,5 @@ require 'groonga/patricia-trie'
 require 'groonga/dumper'
 require 'groonga/schema'
 require 'groonga/pagination'
+require 'groonga/query-log'
+require 'groonga/grntest-log'

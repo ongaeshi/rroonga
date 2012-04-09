@@ -31,7 +31,7 @@ class HashTest < Test::Unit::TestCase
     bookmarks = Groonga::Hash.create(:name => "Bookmarks",
                                      :path => bookmarks_path.to_s)
 
-    groonga = bookmarks.add("groonga")
+    bookmarks.add("groonga")
     google = bookmarks.add("Google")
     cutter = bookmarks.add("Cutter")
 
@@ -62,7 +62,7 @@ class HashTest < Test::Unit::TestCase
     bookmarks = Groonga::Hash.create(:name => "Bookmarks",
                                      :path => bookmarks_path.to_s,
                                      :key_type => "ShortText")
-    uri = bookmarks.define_column("uri", "ShortText")
+    bookmarks.define_column("uri", "ShortText")
     bookmarks.set_column_value("google", "uri", "http://google.com/")
     assert_equal("http://google.com/", bookmarks.column_value("google", "uri"))
   end
@@ -149,11 +149,11 @@ class HashTest < Test::Unit::TestCase
 
   def test_search
     users = Groonga::Array.create(:name => "Users")
-    user_name = users.define_column("name", "ShortText")
+    users.define_column("name", "ShortText")
 
     bookmarks = Groonga::Hash.create(:name => "Bookmarks",
                                      :key_type => "ShortText")
-    bookmark_user_id = bookmarks.define_column("user_id", users)
+    bookmarks.define_column("user_id", users)
 
     daijiro = users.add
     daijiro["name"] = "daijiro"
@@ -165,7 +165,7 @@ class HashTest < Test::Unit::TestCase
 
     records = bookmarks.search("http://groonga.org/")
     assert_equal(["daijiro"],
-                 records.records.collect {|record| record[".user_id.name"]})
+                 records.records.collect {|record| record["user_id.name"]})
   end
 
   def test_add
@@ -196,9 +196,9 @@ class HashTest < Test::Unit::TestCase
                                  :default_tokenizer => "TokenBigram")
     index = terms.define_index_column("comment", bookmarks,
                                       :source => "Bookmarks.comment")
-    groonga = bookmarks.add("groonga", :comment => "search engine by Brazil")
-    google = bookmarks.add("google", :comment => "search engine by Google")
-    ruby = bookmarks.add("ruby", :comment => "programing language")
+    bookmarks.add("groonga", :comment => "search engine by Brazil")
+    bookmarks.add("google", :comment => "search engine by Google")
+    bookmarks.add("ruby", :comment => "programing language")
 
     assert_equal(["groonga", "google"],
                  index.search("engine").collect {|record| record.key.key})
@@ -316,5 +316,29 @@ class HashTest < Test::Unit::TestCase
     assert_predicate(bob, :added?)
     bob_again = users.add("bob")
     assert_not_predicate(bob_again, :added?)
+  end
+
+  def test_defrag
+    users = Groonga::Hash.create(:name => "Users",
+                                 :key_type => "ShortText")
+    users.define_column("name", "ShortText")
+    users.define_column("address", "ShortText")
+    1000.times do |i|
+      users.add("user #{i}",
+                :name => "user #{i}" * 1000,
+                :address => "address #{i}" * 1000)
+    end
+    assert_equal(7, users.defrag)
+  end
+
+  def test_rename
+    users = Groonga::Hash.create(:name => "Users",
+                                 :key_type => "ShortText")
+    name = users.define_column("name", "ShortText")
+    address = users.define_column("address", "ShortText")
+
+    users.rename("People")
+    assert_equal(["People", "People.name", "People.address"],
+                 [users.name, name.name, address.name])
   end
 end

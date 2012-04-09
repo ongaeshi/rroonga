@@ -1,4 +1,4 @@
-/* -*- c-file-style: "ruby" -*- */
+/* -*- coding: utf-8; c-file-style: "ruby" -*- */
 /*
   Copyright (C) 2009-2011  Kouhei Sutou <kou@clear-code.com>
 
@@ -270,8 +270,8 @@ rb_grn_table_cursor_each (VALUE self)
  * call-seq:
  *   cursor.closed? -> true/false
  *
- * カーソルが開放済みの場合は+true+を返し、そうでない場合は
- * +false+を返す。
+ * カーソルが開放済みの場合は +true+ を返し、そうでない場合は
+ * +false+ を返す。
  */
 
 void
@@ -303,5 +303,6 @@ rb_grn_init_table_cursor (VALUE mGrn)
     rb_grn_init_array_cursor(mGrn);
     rb_grn_init_hash_cursor(mGrn);
     rb_grn_init_patricia_trie_cursor(mGrn);
+    rb_grn_init_double_array_trie_cursor(mGrn);
     rb_grn_init_view_cursor(mGrn);
 }

@@ -1,6 +1,6 @@
-/* -*- c-file-style: "ruby" -*- */
+/* -*- coding: utf-8; c-file-style: "ruby" -*- */
 /*
-  Copyright (C) 2010-2011  Kouhei Sutou <kou@clear-code.com>
+  Copyright (C) 2010-2012  Kouhei Sutou <kou@clear-code.com>
 
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -31,7 +31,7 @@ static VALUE cGrnContext;
  *
  * デフォルトで使用されるコンテキストは
  * Groonga::Context#defaultでアクセスできる。コンテキストを
- * 指定できる箇所でコンテキストの指定を省略したり+nil+を指定
+ * 指定できる箇所でコンテキストの指定を省略したり +nil+ を指定
  * した場合はGroonga::Context.defaultが利用される。
  *
  * また、デフォルトのコンテキストは必要になると暗黙のうちに
@@ -59,6 +59,81 @@ rb_grn_context_from_ruby_object (VALUE object)
     return rb_grn_context->context;
 }
 
+void
+rb_grn_context_register_floating_object (RbGrnObject *rb_grn_object)
+{
+    RbGrnContext *rb_grn_context;
+    grn_ctx *context;
+    grn_hash *floating_objects;
+
+    rb_grn_context = rb_grn_object->rb_grn_context;
+    context = rb_grn_context->context;
+    floating_objects = rb_grn_context->floating_objects;
+    if (!floating_objects) {
+	rb_grn_context_reset_floating_objects(rb_grn_context);
+	floating_objects = rb_grn_context->floating_objects;
+    }
+    grn_hash_add(context, floating_objects,
+		 (const void *)(&rb_grn_object), sizeof(RbGrnObject *),
+		 NULL, NULL);
+    rb_grn_object->floating = GRN_TRUE;
+}
+
+void
+rb_grn_context_unregister_floating_object (RbGrnObject *rb_grn_object)
+{
+    RbGrnContext *rb_grn_context;
+    grn_ctx *context;
+    grn_hash *floating_objects;
+
+    if (!rb_grn_object->floating)
+	return;
+
+    rb_grn_context = rb_grn_object->rb_grn_context;
+    if (!rb_grn_context)
+	return;
+
+    context = rb_grn_context->context;
+    floating_objects = rb_grn_context->floating_objects;
+    grn_hash_delete(context, floating_objects,
+		    (const void *)&rb_grn_object, sizeof(RbGrnObject *),
+		    NULL);
+    rb_grn_object->floating = GRN_FALSE;
+}
+
+void
+rb_grn_context_close_floating_objects (RbGrnContext *rb_grn_context)
+{
+    grn_ctx *context;
+    grn_hash *floating_objects;
+    RbGrnObject **floating_object = NULL;
+
+    context = rb_grn_context->context;
+    floating_objects = rb_grn_context->floating_objects;
+    if (!floating_objects)
+	return;
+
+    rb_grn_context->floating_objects = NULL;
+    GRN_HASH_EACH(context, floating_objects, id, &floating_object, NULL, NULL, {
+	    (*floating_object)->floating = GRN_FALSE;
+	    grn_obj_close(context, RB_GRN_OBJECT(*floating_object)->object);
+	});
+    grn_hash_close(context, floating_objects);
+}
+
+void
+rb_grn_context_reset_floating_objects (RbGrnContext *rb_grn_context)
+{
+    grn_ctx *context;
+
+    rb_grn_context_close_floating_objects(rb_grn_context);
+    context = rb_grn_context->context;
+    rb_grn_context->floating_objects = grn_hash_create(context, NULL,
+						       sizeof(RbGrnObject *),
+						       0,
+						       GRN_OBJ_TABLE_HASH_KEY);
+}
+
 static void
 rb_grn_context_unlink_database (grn_ctx *context)
 {
@@ -73,7 +148,7 @@ rb_grn_context_unlink_database (grn_ctx *context)
     debug("context:database: %p:%p: done\n", context, database);
 }
 
-void
+static void
 rb_grn_context_fin (grn_ctx *context)
 {
     if (context->stat == GRN_CTX_FIN)
@@ -93,6 +168,7 @@ rb_grn_context_free (void *pointer)
 
     context = rb_grn_context->context;
     debug("context-free: %p\n", context);
+    rb_grn_context_close_floating_objects(rb_grn_context);
     if (context && !rb_grn_exited)
 	rb_grn_context_fin(context);
     debug("context-free: %p: done\n", context);
@@ -116,6 +192,7 @@ rb_grn_context_finalizer (grn_ctx *context, int n_args, grn_obj **grn_objects,
 
     rb_grn_context = user_data->ptr;
 
+    rb_grn_context_close_floating_objects(rb_grn_context);
     if (!(context->flags & GRN_CTX_PER_DB)) {
 	rb_grn_context_unlink_database(context);
     }
@@ -211,13 +288,31 @@ VALUE
 rb_grn_context_rb_string_encode (grn_ctx *context, VALUE rb_string)
 {
 #ifdef HAVE_RUBY_ENCODING_H
-    rb_encoding *encoding, *to_encode;
+    int index, to_index;
+    rb_encoding *encoding, *to_encoding;
+    grn_encoding context_encoding;
+
+    context_encoding = context->encoding;
+    if (context->encoding == GRN_ENC_DEFAULT)
+	context->encoding = grn_get_default_encoding();
+    if (context->encoding == GRN_ENC_NONE)
+	return rb_string;
+
+    if (RSTRING_LEN(rb_string) < 0)
+	return rb_string;
 
     encoding = rb_enc_get(rb_string);
-    to_encode = rb_grn_encoding_to_ruby_encoding(context->encoding);
-    if (rb_enc_to_index(encoding) != rb_enc_to_index(to_encode))
-	rb_string = rb_str_encode(rb_string, rb_enc_from_encoding(to_encode),
-				  0, Qnil);
+    to_encoding = rb_grn_encoding_to_ruby_encoding(context_encoding);
+    index = rb_enc_to_index(encoding);
+    to_index = rb_enc_to_index(to_encoding);
+    if (index == to_index)
+	return rb_string;
+
+    if (rb_enc_asciicompat(to_encoding) && rb_enc_str_asciionly_p(rb_string))
+	return rb_string;
+
+    rb_string = rb_str_encode(rb_string, rb_enc_from_encoding(to_encoding),
+			      0, Qnil);
 #endif
     return rb_string;
 }
@@ -263,8 +358,8 @@ rb_grn_context_get_default (void)
  * call-seq:
  *   Groonga::Context.default=(context)
  *
- * デフォルトのコンテキストを設定する。+nil+を指定すると、デ
- * フォルトのコンテキストをリセットする。リセットすると、次
+ * デフォルトのコンテキストを設定する。 +nil+ を指定すると、
+ * デフォルトのコンテキストをリセットする。リセットすると、次
  * 回Groonga::Context.defaultを呼び出したときに新しくコンテ
  * キストが作成される。
  */
@@ -307,10 +402,12 @@ rb_grn_context_s_set_default_options (VALUE self, VALUE options)
  * call-seq:
  *   Groonga::Context.new(options=nil)
  *
- * コンテキストを作成する。_options_に指定可能な値は以下の通
+ * コンテキストを作成する。 _options_ に指定可能な値は以下の通
  * り。
+ * @param [::Hash] options The name and value
+ *   pairs. Omitted names are initialized as the default value.
+ * @option options :encoding The encoding
  *
- * [+:encoding+]
  *   エンコーディングを指定する。エンコーディングの指定方法
  *   はGroonga::Encodingを参照。
  */
@@ -344,6 +441,8 @@ rb_grn_context_initialize (int argc, VALUE *argv, VALUE self)
     rb_grn_context_check(context, self);
 
     GRN_CTX_USER_DATA(context)->ptr = rb_grn_context;
+    rb_grn_context->floating_objects = NULL;
+    rb_grn_context_reset_floating_objects(rb_grn_context);
     grn_ctx_set_finalizer(context, rb_grn_context_finalizer);
 
     if (!NIL_P(rb_encoding)) {
@@ -510,8 +609,8 @@ rb_grn_context_set_match_escalation_threshold (VALUE self, VALUE threshold)
  * call-seq:
  *   context.support_zlib?
  *
- * groongaがZlibサポート付きでビルドされていれば+true+、そう
- * でなければ+false+を返す。
+ * groongaがZlibサポート付きでビルドされていれば +true+ 、そう
+ * でなければ +false+ を返す。
  */
 static VALUE
 rb_grn_context_support_zlib_p (VALUE self)
@@ -533,8 +632,8 @@ rb_grn_context_support_zlib_p (VALUE self)
  * call-seq:
  *   context.support_lzo?
  *
- * groongaがLZOサポート付きでビルドされていれば+true+、そう
- * でなければ+false+を返す。
+ * groongaがLZOサポート付きでビルドされていれば +true+ 、そう
+ * でなければ +false+ を返す。
  */
 static VALUE
 rb_grn_context_support_lzo_p (VALUE self)
@@ -571,14 +670,16 @@ rb_grn_context_get_database (VALUE self)
  * call-seq:
  *   context.connect(options=nil)
  *
- * groongaサーバに接続する。_options_に指定可能な値は以下の通
+ * groongaサーバに接続する。 _options_ に指定可能な値は以下の通
  * り。
+ * @param [::Hash] options The name and value
+ *   pairs. Omitted names are initialized as the default value.
+ * @option options :host (localhost) The groonga server host name
  *
- * [+:host+]
  *   groongaサーバのホスト名。またはIPアドレス。省略すると
  *   "localhost"に接続する。
+ * @option options :port (10041) The port number
  *
- * [+:port+]
  *   groongaサーバのポート番号。省略すると10041番ポートに接
  *   続する。
  */
@@ -749,10 +850,10 @@ rb_grn_context_get_backward_compatibility (grn_ctx *context,
  *
  * コンテキスト管理下にあるオブジェクトを返す。
  *
- * _name_として文字列を指定した場合はオブジェクト名でオブジェ
+ * _name_ として文字列を指定した場合はオブジェクト名でオブジェ
  * クトを検索する。
  *
- * _id_として数値を指定した場合はオブジェクトIDでオブジェク
+ * _id_ として数値を指定した場合はオブジェクトIDでオブジェク
  * トを検索する。
  */
 static VALUE

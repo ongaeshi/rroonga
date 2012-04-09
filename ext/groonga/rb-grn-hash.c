@@ -1,4 +1,4 @@
-/* -*- c-file-style: "ruby" -*- */
+/* -*- coding: utf-8; c-file-style: "ruby" -*- */
 /*
   Copyright (C) 2009  Kouhei Sutou <kou@clear-code.com>
 
@@ -38,34 +38,37 @@ VALUE rb_cGrnHash;
  * 定すると、そのブロックに生成したテーブルが渡され、ブロック
  * を抜けると自動的にテーブルが破棄される。
  *
- * _options_に指定可能な値は以下の通り。
+ * _options_ に指定可能な値は以下の通り。
+ * @param [::Hash] options The name and value
+ *   pairs. Omitted names are initialized as the default value
+ * @option options [Groonga::Context] :context (Groonga::Context.default) The context
  *
- * [+:context+]
  *   テーブルが利用するGroonga::Context。省略すると
  *   Groonga::Context.defaultを用いる。
+ * @option options [Groonga::Context#[]] :name The name
  *
- * [+:name+]
  *   テーブルの名前。名前をつけると、Groonga::Context#[]に名
  *   前を指定してテーブルを取得することができる。省略すると
  *   無名テーブルになり、テーブルIDでのみ取得できる。
  *
- * [+:path+]
+ * @option options [Groonga::Context#[]] :path The path
+ *
  *   テーブルを保存するパス。パスを指定すると永続テーブルとな
  *   り、プロセス終了後もレコードは保持される。次回起動時に
  *   Groonga::Context#[]で保存されたレコードを利用することが
  *   できる。省略すると一時テーブルになり、プロセスが終了する
  *   とレコードは破棄される。
  *
- * [+:persistent+]
- *   +true+を指定すると永続テーブルとなる。+path+を省略した
- *   場合は自動的にパスが付加される。+:context+で指定した
+ * @option options :persistent The persistent
+ *   +true+ を指定すると永続テーブルとなる。 +path+ を省略した
+ *   場合は自動的にパスが付加される。 +:context+ で指定した
  *   Groonga::Contextに結びついているデータベースが一時デー
  *   タベースの場合は例外が発生する。
  *
- * [+:key_normalize+]
- *   +true+を指定するとキーを正規化する。
+ * @option options :key_normalize The normalize
+ *   +true+ を指定するとキーを正規化する。
  *
- * [+:key_type+]
+ * @option options :key_type The key_type
  *   キーの種類を示すオブジェクトを指定する。キーの種類には型
  *   名（"Int32"や"ShortText"など）またはGroonga::Typeまたは
  *   テーブル（Groonga::Array、Groonga::Hash、
@@ -84,60 +87,57 @@ VALUE rb_cGrnHash;
  *   省略した場合はShortText型をキーとして使用する。この場合、
  *   4096バイトまで使用可能である。
  *
- * [+:value_type+]
+ * @option options :value_type The value_type
+ *
  *   値の型を指定する。省略すると値のための領域を確保しない。
  *   値を保存したい場合は必ず指定すること。
  *
  *   参考: Groonga::Type.new
  *
- * [+:default_tokenizer+]
+ * @option options [Groonga::IndexColumn] :default_tokenizer The default_tokenizer
  *   Groonga::IndexColumnで使用するトークナイザを指定する。
  *   デフォルトでは何も設定されていないので、テーブルに
  *   Groonga::IndexColumnを定義する場合は
  *   <tt>"TokenBigram"</tt>などを指定する必要がある。
  *
- * [+:sub_records+]
- *   +true+を指定すると#groupでグループ化したときに、
+ * @option options [Groonga::Record#n_sub_records] :sub_records The sub_records
+ *   +true+ を指定すると#groupでグループ化したときに、
  *   Groonga::Record#n_sub_recordsでグループに含まれるレコー
  *   ドの件数を取得できる。
  *
- * 使用例:
- *
- * 無名一時テーブルを生成する。
+ * @example
+ *   #無名一時テーブルを生成する。
  *   Groonga::Hash.create
  *
- * 無名永続テーブルを生成する。
+ *   #無名永続テーブルを生成する。
  *   Groonga::Hash.create(:path => "/tmp/hash.grn")
  *
- * 名前付き永続テーブルを生成する。ただし、ファイル名は気に
- * しない。
+ *   #名前付き永続テーブルを生成する。ただし、ファイル名は気にしない。
  *   Groonga::Hash.create(:name => "Bookmarks",
  *                        :persistent => true)
  *
- * それぞれのレコードに512バイトの値を格納できる無名一時テー
- * ブルを生成する。
+ *   #それぞれのレコードに512バイトの値を格納できる無名一時テーブルを生成する。
  *   Groonga::Hash.create(:value => 512)
  *
- * キーとして文字列を使用する無名一時テーブルを生成する。
+ *   #キーとして文字列を使用する無名一時テーブルを生成する。
  *   Groonga::Hash.create(:key_type => Groonga::Type::SHORT_TEXT)
  *
- * キーとして文字列を使用する無名一時テーブルを生成する。
- * （キーの種類を表すオブジェクトは文字列で指定。）
+ *   #キーとして文字列を使用する無名一時テーブルを生成する。
+ *   （キーの種類を表すオブジェクトは文字列で指定。）
  *   Groonga::Hash.create(:key_type => "ShortText")
  *
- * キーとして<tt>Bookmarks</tt>テーブルのレコードを使用す
- * る無名一時テーブルを生成する。
+ *   #キーとして<tt>Bookmarks</tt>テーブルのレコードを使用す
+ *   る無名一時テーブルを生成する。
  *   bookmarks = Groonga::Hash.create(:name => "Bookmarks")
  *   Groonga::Hash.create(:key_type => bookmarks)
  *
- * キーとして<tt>Bookmarks</tt>テーブルのレコードを使用す
- * る無名一時テーブルを生成する。
- * （テーブルは文字列で指定。）
+ *   #キーとして<tt>Bookmarks</tt>テーブルのレコードを使用す
+ *   #る無名一時テーブルを生成する。（テーブルは文字列で指定。）
  *   Groonga::Hash.create(:name => "Bookmarks")
  *   Groonga::Hash.create(:key_type => "Bookmarks")
  *
- * 全文検索用のトークンをバイグラムで切り出す無名一時テーブ
- * ルを生成する。
+ *   #全文検索用のトークンをバイグラムで切り出す無名一時テーブ
+ *   #ルを生成する。
  *   bookmarks = Groonga::Hash.create(:name => "Bookmarks")
  *   bookmarks.define_column("comment", "Text")
  *   terms = Groonga::Hash.create(:name => "Terms",
@@ -223,20 +223,23 @@ rb_grn_hash_s_create (int argc, VALUE *argv, VALUE klass)
  * call-seq:
  *   hash.search(key, options=nil) -> Groonga::Hash
  *
- * _key_にマッチするレコードのIDがキーに入っている
+ * _key_ にマッチするレコードのIDがキーに入っている
  * Groonga::Hashを返す。マッチするレコードがない場合は空の
  * Groonga::Hashが返る。
  *
- * _options_で+:result+を指定することにより、そのテーブルにマッ
+ * _options_ で +:result+ を指定することにより、そのテーブルにマッ
  * チしたレコードIDがキーのレコードを追加することができる。
- * +:result+にテーブルを指定した場合は、そのテーブルが返る。
+ * +:result+ にテーブルを指定した場合は、そのテーブルが返る。
  *
- * _options_に指定可能な値は以下の通り。
+ * _options_ に指定可能な値は以下の通り。
+ * @param [::Hash] options The name and value
+ *   pairs. Omitted names are initialized as the default value
  *
- * [+:result+]
+ * @option options :result The result
+ *
  *   結果を格納するテーブル。
  *
- * 複数のキーで検索し、結果を1つのテーブルに集める。
+ * @example 複数のキーで検索し、結果を1つのテーブルに集める。
  *   result = nil
  *   keys = ["morita", "gunyara-kun", "yu"]
  *   keys.each do |key|
