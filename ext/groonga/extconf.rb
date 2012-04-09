@@ -46,8 +46,12 @@ checking_for(checking_message("GCC")) do
   end
 end
 
+def win32?
+  /cygwin|mingw|mswin/ =~ RUBY_PLATFORM
+end
+
 checking_for(checking_message("Win32 OS")) do
-  win32 = /cygwin|mingw|mswin/ =~ RUBY_PLATFORM
+  win32 = win32?
   if win32
     $defs << "-DRB_GRN_PLATFORM_WIN32"
     import_library_name = "libruby-#{module_name}.a"
@@ -65,65 +69,110 @@ def install_groonga_locally(major, minor, micro)
   require 'open-uri'
   require 'shellwords'
 
-  tar_gz = "groonga-#{major}.#{minor}.#{micro}.tar.gz"
   FileUtils.mkdir_p(local_groonga_base_dir)
 
-  install_dir = local_groonga_install_dir
   Dir.chdir(local_groonga_base_dir) do
-    url = "http://packages.groonga.org/source/groonga/#{tar_gz}"
-    message("downloading %s...", url)
-    open(url, "rb") do |input|
-      File.open(tar_gz, "wb") do |output|
-        while (buffer = input.read(1024))
-          output.print(buffer)
-        end
+    unless win32?
+      install_groonga_locally_with_compile(major, minor, micro)
+    else
+      install_groonga_locally_win32(major, minor, micro)
+    end
+  end
+
+  prepend_pkg_config_path_for_local_groonga
+end
+
+def install_groonga_locally_win32(major, minor, micro)
+  file_name = "groonga-#{major}.#{minor}.#{micro}-x86.zip"
+  url = "http://packages.groonga.org/windows/groonga/#{file_name}"
+  install_dir = local_groonga_install_dir
+
+  message("downloading %s...", url)
+  open(url, "rb") do |input|
+    File.open(file_name, "wb") do |output|
+      while (buffer = input.read(1024))
+        output.print(buffer)
       end
     end
-    message(" done\n")
+  end
+  message(" done\n")
 
-    message("extracting...")
-    if xsystem("tar xfz #{tar_gz}")
+  message("extracting...")
+  if xsystem("unzip #{file_name}")
+    message(" done\n")
+  else
+    message(" failed\n")
+    exit 1
+  end
+
+  message("remove old install...")
+  require 'fileutils'
+  FileUtils.rm_r(install_dir) if File.exist?(install_dir)
+
+  message("install...")
+  if xsystem("mv #{File.basename(file_name, ".zip")} #{install_dir}")
+    message(" done\n")
+  else
+    message(" failed\n")
+    exit 1
+  end
+end
+
+def install_groonga_locally_with_compile(major, minor, micro)
+  tar_gz = "groonga-#{major}.#{minor}.#{micro}.tar.gz"
+  url = "http://packages.groonga.org/source/groonga/#{tar_gz}"
+  install_dir = local_groonga_install_dir
+  
+  message("downloading %s...", url)
+  open(url, "rb") do |input|
+    File.open(tar_gz, "wb") do |output|
+      while (buffer = input.read(1024))
+        output.print(buffer)
+      end
+    end
+  end
+  message(" done\n")
+
+  message("extracting...")
+  if xsystem("tar xfz #{tar_gz}")
+    message(" done\n")
+  else
+    message(" failed\n")
+    exit 1
+  end
+
+  groonga_source_dir = "groonga-#{major}.#{minor}.#{micro}"
+  Dir.chdir(groonga_source_dir) do
+    message("configuring...")
+    prefix = Shellwords.escape(install_dir)
+    if xsystem("./configure CFLAGS='-g -O0' --prefix=#{prefix}")
       message(" done\n")
     else
       message(" failed\n")
       exit 1
     end
 
-    groonga_source_dir = "groonga-#{major}.#{minor}.#{micro}"
-    Dir.chdir(groonga_source_dir) do
-      message("configuring...")
-      prefix = Shellwords.escape(install_dir)
-      if xsystem("./configure CFLAGS='-g -O0' --prefix=#{prefix}")
-        message(" done\n")
-      else
-        message(" failed\n")
-        exit 1
-      end
+    message("building (maybe long time)...")
+    if xsystem("make")
+      message(" done\n")
+    else
+      message(" failed\n")
+      exit 1
+    end
 
-      message("building (maybe long time)...")
-      if xsystem("make")
-        message(" done\n")
-      else
-        message(" failed\n")
-        exit 1
-      end
-
-      message("installing...")
-      if [major, minor, micro] == [0, 1, 6]
-        make_install_args = " MKDIR_P='mkdir -p --'"
-      else
-        make_install_args = ""
-      end
-      if xsystem("make install#{make_install_args}")
-        message(" done\n")
-      else
-        message(" failed\n")
-        exit 1
-      end
+    message("installing...")
+    if [major, minor, micro] == [0, 1, 6]
+      make_install_args = " MKDIR_P='mkdir -p --'"
+    else
+      make_install_args = ""
+    end
+    if xsystem("make install#{make_install_args}")
+      message(" done\n")
+    else
+      message(" failed\n")
+      exit 1
     end
   end
-
-  prepend_pkg_config_path_for_local_groonga
 end
 
 unless PKGConfig.have_package(package_name, major, minor, micro)
