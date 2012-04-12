@@ -95,11 +95,9 @@ def zip_extract(filename, dst_dir)
   root_list = root_entrylist(filename)
   
   if (root_list.size == 1)
-    # extract
     Archive::Zip.extract filename, dst_dir
     return root_list[0].gsub("/", "")
   else
-    # mkdir and extract
     dir = File.basename(filename).sub(/#{File.extname(filename)}$/, "")
     FileUtils.mkdir_p File.join(dst_dir, dir)
     Archive::Zip.extract filename, File.join(dst_dir, dir)
@@ -138,22 +136,13 @@ def install_groonga_locally_win32(major, minor, micro)
   message("extracting...\n")
   zip_extract(file_name, '.')
 
-  # message("extracting...")
-  # if xsystem("unzip #{file_name}")
-  #   message(" done\n")
-  # else
-  #   message(" failed\n")
-  #   exit 1
-  # end
-
   require 'fileutils'
-
   if File.exist?(install_dir)
     message("remove old install...\n")
     FileUtils.rm_r(install_dir)
   end
 
-  message("install...")
+  message("install...\n")
   FileUtils.mv(File.basename(file_name, ".zip"), File.basename(install_dir))
 end
 
