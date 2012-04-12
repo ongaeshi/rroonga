@@ -82,8 +82,46 @@ def install_groonga_locally(major, minor, micro)
   prepend_pkg_config_path_for_local_groonga
 end
 
+begin
+  require 'archive/zip'
+rescue LoadError
+  require 'rubygems'
+  require 'archive/zip'
+end
+
+def zip_extract(filename, dst_dir)
+  return nil unless File.exist?(filename)
+  
+  root_list = root_entrylist(filename)
+  
+  if (root_list.size == 1)
+    # extract
+    Archive::Zip.extract filename, dst_dir
+    return root_list[0].gsub("/", "")
+  else
+    # mkdir and extract
+    dir = File.basename(filename).sub(/#{File.extname(filename)}$/, "")
+    FileUtils.mkdir_p File.join(dst_dir, dir)
+    Archive::Zip.extract filename, File.join(dst_dir, dir)
+    return dir
+  end
+end
+
+def root_entrylist(filename)
+  list = []
+  
+  Archive::Zip.open(filename) do |archive|
+    archive.each do |entry|
+      list << entry.zip_path if entry.zip_path.split('/').size == 1
+    end
+  end
+
+  list
+end
+
 def install_groonga_locally_win32(major, minor, micro)
   file_name = "groonga-#{major}.#{minor}.#{micro}-x86.zip"
+  # file_name = "groonga-#{major}.#{minor}.#{micro}-x64.zip"
   url = "http://packages.groonga.org/windows/groonga/#{file_name}"
   install_dir = local_groonga_install_dir
 
@@ -97,25 +135,26 @@ def install_groonga_locally_win32(major, minor, micro)
   end
   message(" done\n")
 
-  message("extracting...")
-  if xsystem("unzip #{file_name}")
-    message(" done\n")
-  else
-    message(" failed\n")
-    exit 1
-  end
+  message("extracting...\n")
+  zip_extract(file_name, '.')
 
-  message("remove old install...")
+  # message("extracting...")
+  # if xsystem("unzip #{file_name}")
+  #   message(" done\n")
+  # else
+  #   message(" failed\n")
+  #   exit 1
+  # end
+
   require 'fileutils'
-  FileUtils.rm_r(install_dir) if File.exist?(install_dir)
+
+  if File.exist?(install_dir)
+    message("remove old install...\n")
+    FileUtils.rm_r(install_dir)
+  end
 
   message("install...")
-  if xsystem("mv #{File.basename(file_name, ".zip")} #{install_dir}")
-    message(" done\n")
-  else
-    message(" failed\n")
-    exit 1
-  end
+  FileUtils.mv(File.basename(file_name, ".zip"), File.basename(install_dir))
 end
 
 def install_groonga_locally_with_compile(major, minor, micro)
